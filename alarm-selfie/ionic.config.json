@@ -1,0 +1,7 @@
+{
+  "name": "alarm-selfie",
+  "integrations": {
+    "capacitor": {}
+  },
+  "type": "react-vite"
+}
