@@ -1,58 +1,120 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { displayHost, isLikelyFrameBlockedHost, normalizeUrl } from '../utils/url';
+import { UPS_PROXY_PATH } from '../config';
+import { getPanePopup, setPanePopup } from '../utils/popupRegistry';
+import { displayHost, resolveNavigation } from '../utils/url';
 import './BrowserPane.css';
+
+const POPUP_FEATURES =
+  'popup=yes,toolbar=yes,location=yes,status=yes,menubar=no,scrollbars=yes,resizable=yes,width=960,height=720';
+
+function popupWindowName(paneId) {
+  return `ups-pane-${paneId}`;
+}
 
 export default function BrowserPane({ paneId, label, initialUrl = '' }) {
   const iframeRef = useRef(null);
-  const [inputValue, setInputValue] = useState(initialUrl);
-  const [activeUrl, setActiveUrl] = useState('');
+  const popupRef = useRef(null);
+  const initialLoadDone = useRef(false);
+  const [inputValue, setInputValue] = useState(initialUrl || UPS_PROXY_PATH);
+  const [activeNav, setActiveNav] = useState(null);
   const [history, setHistory] = useState({ entries: [], index: -1 });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [popupMissing, setPopupMissing] = useState(false);
 
+  const activeUrl = activeNav?.url ?? '';
   const { entries, index } = history;
   const canGoBack = index > 0;
   const canGoForward = index >= 0 && index < entries.length - 1;
   const tabTitle = activeUrl ? displayHost(activeUrl) : label;
+  const isPopup = activeNav?.mode === 'popup';
 
-  const navigateTo = useCallback((rawUrl) => {
-    const normalized = normalizeUrl(rawUrl);
-    if (!normalized) {
-      setError('Enter a valid http or https URL.');
+  const resolvePopup = useCallback(() => {
+    const fromRef = popupRef.current;
+    if (fromRef && !fromRef.closed) return fromRef;
+    const fromRegistry = getPanePopup(paneId);
+    if (fromRegistry) {
+      popupRef.current = fromRegistry;
+      return fromRegistry;
+    }
+    return null;
+  }, [paneId]);
+
+  const focusPopup = useCallback(() => {
+    setPopupMissing(false);
+    const win = resolvePopup();
+    if (win) {
+      win.focus();
       return;
     }
+    setPopupMissing(true);
+  }, [resolvePopup]);
 
-    if (isLikelyFrameBlockedHost(normalized)) {
-      setError(
-        'This site blocks embedding in iframes (e.g. X/Twitter). Use a local URL such as http://192.168.1.10:8080 instead.',
-      );
-      return;
-    }
+  const openPopup = useCallback(
+    (url) => {
+      setPopupMissing(false);
+      const name = popupWindowName(paneId);
+      const existing = resolvePopup();
 
-    setError('');
-    setInputValue(normalized);
-    setActiveUrl(normalized);
-    setLoading(true);
+      if (existing) {
+        if (url) existing.location.href = url;
+        existing.focus();
+        setPanePopup(paneId, existing);
+        return;
+      }
 
-    setHistory(({ entries: prevEntries, index: prevIndex }) => {
-      const base = prevEntries.slice(0, prevIndex + 1);
-      const nextEntries = [...base, normalized];
-      return { entries: nextEntries, index: nextEntries.length - 1 };
-    });
-  }, []);
+      const win = window.open(url, name, POPUP_FEATURES);
+      popupRef.current = win;
+      setPanePopup(paneId, win);
+    },
+    [paneId, resolvePopup],
+  );
+
+  const navigateTo = useCallback(
+    (rawUrl) => {
+      const nav = resolveNavigation(rawUrl);
+      if (!nav) {
+        setError(
+          'Invalid URL. Use /ups-proxy/ or your UPS IP for LAN devices, or sites like google.com / x.com for pop-out.',
+        );
+        return;
+      }
+
+      setError('');
+      setInputValue(nav.url);
+      setActiveNav(nav);
+      setLoading(nav.mode === 'iframe');
+
+      if (nav.mode === 'popup') {
+        openPopup(nav.url);
+      }
+
+      setHistory(({ entries: prevEntries, index: prevIndex }) => {
+        const base = prevEntries.slice(0, prevIndex + 1);
+        const nextEntries = [...base, nav];
+        return { entries: nextEntries, index: nextEntries.length - 1 };
+      });
+    },
+    [openPopup],
+  );
 
   useEffect(() => {
-    if (!initialUrl) return;
+    if (!initialUrl || initialLoadDone.current) return;
+    initialLoadDone.current = true;
     navigateTo(initialUrl);
   }, [initialUrl, navigateTo]);
 
   const goToHistoryIndex = (nextIndex) => {
-    const url = entries[nextIndex];
+    const nav = entries[nextIndex];
     setHistory((prev) => ({ ...prev, index: nextIndex }));
-    setInputValue(url);
-    setActiveUrl(url);
-    setLoading(true);
+    setInputValue(nav.url);
+    setActiveNav(nav);
+    setLoading(nav.mode === 'iframe');
     setError('');
+
+    if (nav.mode === 'popup') {
+      openPopup(nav.url);
+    }
   };
 
   const goBack = () => {
@@ -66,10 +128,21 @@ export default function BrowserPane({ paneId, label, initialUrl = '' }) {
   };
 
   const reload = () => {
-    if (!activeUrl || !iframeRef.current) return;
+    if (!activeNav) return;
+    if (activeNav.mode === 'popup') {
+      if (popupRef.current && !popupRef.current.closed) {
+        popupRef.current.location.reload();
+      } else {
+        openPopup(activeNav.url);
+      }
+      return;
+    }
+    if (!iframeRef.current) return;
     setLoading(true);
     setError('');
-    iframeRef.current.src = activeUrl;
+    const frame = iframeRef.current;
+    frame.src = '';
+    frame.src = activeNav.url;
   };
 
   const handleSubmit = (e) => {
@@ -81,18 +154,18 @@ export default function BrowserPane({ paneId, label, initialUrl = '' }) {
     setLoading(false);
   };
 
-  const handleIframeError = () => {
-    setLoading(false);
-    setError(
-      'Could not load in this pane. If this is a LAN device, use http:// and include the port (e.g. http://192.168.1.10:8080). Some servers also block iframes.',
-    );
+  const openNewTab = () => {
+    if (activeUrl) window.open(activeUrl, '_blank', 'noopener,noreferrer');
   };
 
   return (
     <article className="browser-pane" aria-label={`Browser pane ${paneId}`}>
       <div className="browser-pane__chrome">
         <div className="browser-pane__tab" title={tabTitle}>
-          <span className="browser-pane__tab-dot" aria-hidden />
+          <span
+            className={`browser-pane__tab-dot${isPopup ? ' browser-pane__tab-dot--popup' : ''}`}
+            aria-hidden
+          />
           <span className="browser-pane__tab-title">{tabTitle}</span>
         </div>
 
@@ -122,7 +195,7 @@ export default function BrowserPane({ paneId, label, initialUrl = '' }) {
               type="button"
               className="browser-pane__btn"
               onClick={reload}
-              disabled={!activeUrl}
+              disabled={!activeNav}
               title="Reload"
               aria-label="Reload"
             >
@@ -136,7 +209,7 @@ export default function BrowserPane({ paneId, label, initialUrl = '' }) {
               className="browser-pane__url-input"
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
-              placeholder="http://192.168.163.160"
+              placeholder="google.com, x.com, /ups-proxy/"
               spellCheck={false}
               aria-label={`URL for ${label}`}
             />
@@ -148,7 +221,7 @@ export default function BrowserPane({ paneId, label, initialUrl = '' }) {
       </div>
 
       <div className="browser-pane__viewport">
-        {loading && activeUrl && (
+        {loading && activeNav?.mode === 'iframe' && (
           <div className="browser-pane__loading" aria-live="polite">
             Loading…
           </div>
@@ -160,26 +233,53 @@ export default function BrowserPane({ paneId, label, initialUrl = '' }) {
           </div>
         )}
 
-        {!activeUrl && !error && (
+        {!activeNav && !error && (
           <div className="browser-pane__empty">
             <p>
-              Enter a URL above. Local LAN sites work best (e.g.{' '}
-              <code>http://192.168.1.10:3000</code>). Major sites like X.com block
-              iframes.
+              <strong>LAN UPS:</strong> <code>/ups-proxy/</code> or device IP (in-grid).
+            </p>
+            <p>
+              <strong>Google, X/Twitter, etc.:</strong> type the URL and press Go — opens in a
+              pop-out window (these sites block iframes).
             </p>
           </div>
         )}
 
-        {activeUrl && (
+        {activeNav?.mode === 'iframe' && (
           <iframe
             ref={iframeRef}
             className="browser-pane__frame"
-            src={activeUrl}
+            src={activeNav.url}
             title={`${label} content`}
-            sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals allow-pointer-lock"
             onLoad={handleIframeLoad}
-            onError={handleIframeError}
           />
+        )}
+
+        {activeNav?.mode === 'popup' && (
+          <div className="browser-pane__popup-panel">
+            <div className="browser-pane__popup-icon" aria-hidden>
+              ↗
+            </div>
+            <h3 className="browser-pane__popup-title">{displayHost(activeNav.url)}</h3>
+            <p className="browser-pane__popup-url">{activeNav.url}</p>
+            <p className="browser-pane__popup-hint">
+              Google, X/Twitter, and similar sites cannot be shown inside the dashboard grid.
+              They open in a separate browser window instead.
+            </p>
+            {popupMissing && (
+              <p className="browser-pane__popup-missing" role="status">
+                Pop-out was closed. Press <strong>Go</strong> in the address bar to open it again.
+              </p>
+            )}
+            <div className="browser-pane__popup-actions">
+              <button type="button" className="browser-pane__popup-btn" onClick={focusPopup}>
+                Focus pop-out window
+              </button>
+              <button type="button" className="browser-pane__popup-btn browser-pane__popup-btn--secondary" onClick={openNewTab}>
+                Open in new tab
+              </button>
+            </div>
+          </div>
         )}
       </div>
     </article>

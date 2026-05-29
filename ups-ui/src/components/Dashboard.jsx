@@ -14,7 +14,8 @@ export default function Dashboard() {
       <header className="dashboard__header">
         <h1 className="dashboard__title">UPS Dashboard</h1>
         <p className="dashboard__subtitle">
-          Five independent browser panes — enter a URL in any pane to load the site.
+          LAN UPS in-grid via <code>/ups-proxy/</code>. Google, X/Twitter, etc. open in pop-out
+          windows (required — they block iframes).
         </p>
       </header>
 

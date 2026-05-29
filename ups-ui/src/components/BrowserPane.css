@@ -32,6 +32,10 @@
   flex-shrink: 0;
 }
 
+.browser-pane__tab-dot--popup {
+  background: #fbbf24;
+}
+
 .browser-pane__tab-title {
   font-size: 0.75rem;
   color: #c8d0dc;
@@ -163,4 +167,80 @@
   background: rgba(30, 20, 20, 0.92);
   color: #fca5a5;
   z-index: 3;
+}
+
+.browser-pane__popup-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 1.25rem;
+  text-align: center;
+  background: linear-gradient(160deg, #1a2030 0%, #12151c 100%);
+}
+
+.browser-pane__popup-icon {
+  font-size: 2rem;
+  color: #fbbf24;
+  margin-bottom: 0.5rem;
+}
+
+.browser-pane__popup-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.browser-pane__popup-url {
+  margin: 0.35rem 0 0.75rem;
+  font-size: 0.72rem;
+  color: #8b95a8;
+  word-break: break-all;
+  max-width: 100%;
+}
+
+.browser-pane__popup-hint {
+  margin: 0 0 1rem;
+  font-size: 0.8rem;
+  color: #9ca3af;
+  max-width: 18rem;
+  line-height: 1.45;
+}
+
+.browser-pane__popup-missing {
+  margin: 0 0 0.75rem;
+  font-size: 0.78rem;
+  color: #fbbf24;
+  max-width: 16rem;
+}
+
+.browser-pane__popup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: center;
+}
+
+.browser-pane__popup-btn {
+  padding: 0.45rem 0.85rem;
+  border: none;
+  border-radius: 6px;
+  background: #3b82f6;
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.browser-pane__popup-btn:hover {
+  background: #2563eb;
+}
+
+.browser-pane__popup-btn--secondary {
+  background: #353b48;
+}
+
+.browser-pane__popup-btn--secondary:hover {
+  background: #434a58;
 }
